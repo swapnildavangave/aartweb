@@ -25,7 +25,8 @@ SECRET_KEY = 'oh&k&cabk!5tk*!r1ih%%-s%5ml+!0(0wm*o9l1yb24v6w*9r8'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']
+SITE_ID = 1
 
 
 # Application definition
@@ -37,6 +38,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django.contrib.sites',
     'accounts',
 ]
 
@@ -67,6 +69,12 @@ TEMPLATES = [
             ],
         },
     },
+]
+
+TEMPLATE_CONTEXT_PROCESSORS = [
+    "account.context_processors.account",
+    "django.core.context_processors.request",
+    "pinax_theme_bootstrap.context_processors.theme",
 ]
 
 WSGI_APPLICATION = 'aartweb.wsgi.application'
@@ -136,8 +144,9 @@ USE_I18N = True
 USE_L10N = True
 
 USE_TZ = True
-
-
+ACCOUNT_EMAIL_UNIQUE = True
+ACCOUNT_EMAIL_CONFIRMATION_REQUIRED = True
+ACCOUNT_EMAIL_CONFIRMATION_URL = '/confirm_email/'
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/1.9/howto/static-files/
 STATIC_ROOT = os.path.join(BASE_DIR, 'statics')

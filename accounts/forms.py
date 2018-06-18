@@ -9,8 +9,9 @@ from django.contrib             import auth
 from django.contrib.auth        import get_user_model
 from account.conf               import settings
 from account.hooks              import hookset
-from account.models             import EmailAddress
+from accounts.models            import EmailAddress
 from account.utils              import get_user_lookup_kwargs
+from models                     import AartUser
 import re
 
 
@@ -127,48 +128,22 @@ class LoginForm(forms.Form):
     def clean(self):
         if self._errors:
             return
-        user = auth.authenticate(**self.user_credentials())
-        if user:
-            if user.is_active:
-                self.user = user
-            else:
-                raise forms.ValidationError(_("This account is inactive."))
+        username = self.cleaned_data['username']
+        password = self.cleaned_data['password']
+        try:
+            user = AartUser.objects.get(email=username)
+        except AartUser.DoesNotExist:
+            return forms.ValidationError(self.authentication_fail_message)
+        else:
+            user = auth.authenticate(**self.user_credentials())
+        if user and user.check_password(password):
+            self.user = user
         else:
             raise forms.ValidationError(self.authentication_fail_message)
         return self.cleaned_data
 
     def user_credentials(self):
         return hookset.get_user_credentials(self, self.identifier_field)
-
-
-class LoginUsernameForm(LoginForm):
-
-    username = forms.CharField(label=_("Username"), max_length=30)
-    authentication_fail_message = _("The username and/or password you specified are not correct.")
-    identifier_field = "username"
-
-    def __init__(self, *args, **kwargs):
-        super(LoginUsernameForm, self).__init__(*args, **kwargs)
-        field_order = ["username", "password", "remember"]
-        if not OrderedDict or hasattr(self.fields, "keyOrder"):
-            self.fields.keyOrder = field_order
-        else:
-            self.fields = OrderedDict((k, self.fields[k]) for k in field_order)
-
-
-class LoginEmailForm(LoginForm):
-
-    email = forms.EmailField(label=_("Email"))
-    authentication_fail_message = _("The email address and/or password you specified are not correct.")
-    identifier_field = "email"
-
-    def __init__(self, *args, **kwargs):
-        super(LoginEmailForm, self).__init__(*args, **kwargs)
-        field_order = ["email", "password", "remember"]
-        if not OrderedDict or hasattr(self.fields, "keyOrder"):
-            self.fields.keyOrder = field_order
-        else:
-            self.fields = OrderedDict((k, self.fields[k]) for k in field_order)
 
 
 class ChangePasswordForm(forms.Form):
@@ -231,8 +206,10 @@ class PasswordResetTokenForm(forms.Form):
         return self.cleaned_data["password_confirm"]
 
 
-class SettingsForm(forms.Form):
+class UserSettingsForm(forms.Form):
 
+    first_name
+    last_name
     email = forms.EmailField(label=_("Email"), required=True)
     timezone = forms.ChoiceField(
         label=_("Timezone"),

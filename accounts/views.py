@@ -1,32 +1,53 @@
 
-from django.http                    import Http404, HttpResponseForbidden
-from django.shortcuts               import redirect, get_object_or_404
-from django.utils.decorators        import method_decorator
-from django.utils.http              import base36_to_int, int_to_base36
-from django.utils.translation       import ugettext_lazy as _
-from django.views.decorators.cache  import never_cache
-from django.views.decorators.csrf   import csrf_protect
-from django.views.decorators.debug  import sensitive_post_parameters
-from django.views.generic.base      import TemplateResponseMixin, View
-from django.views.generic.edit      import FormView
+from django.http                        import Http404, HttpResponseForbidden, HttpResponse
+from django.shortcuts                   import redirect, get_object_or_404
+from django.utils.decorators            import method_decorator
+from django.utils.http                  import base36_to_int, int_to_base36
+from django.utils.translation           import ugettext_lazy as _
+from django.views.decorators.cache      import never_cache
+from django.views.decorators.csrf       import csrf_protect
+from django.views.decorators.debug      import sensitive_post_parameters
+from django.views.generic.base          import TemplateResponseMixin, View
+from django.views.generic.edit          import FormView
+from django.contrib                     import auth, messages
+from django.contrib.auth                import get_user_model
+from django.contrib.auth.hashers        import make_password
+from django.contrib.auth.tokens         import default_token_generator
+from django.contrib.sites.shortcuts     import get_current_site
+from account                            import signals
+from account.compat                     import reverse, is_authenticated
+from account.conf                       import settings
+from account.forms                      import SignupForm, LoginUsernameForm
+from account.forms                      import ChangePasswordForm, PasswordResetForm, PasswordResetTokenForm
+from account.forms                      import UserSettingsForm
+from account.hooks                      import hookset
+from account.mixins                     import LoginRequiredMixin
+from account.models                     import SignupCode, EmailAddress, EmailConfirmation, AartUser, UserDeletion, PasswordHistory
+from account.utils                      import default_redirect, get_form_data
+from django.shortcuts                   import render_to_response, redirect
+from django.template                    import loader, Context
+from django.template                    import RequestContext
+from django.contrib.sites.shortcuts     import get_current_site
 
-from django.contrib                 import auth, messages
-from django.contrib.auth            import get_user_model
-from django.contrib.auth.hashers    import make_password
-from django.contrib.auth.tokens     import default_token_generator
-from django.contrib.sites.shortcuts import get_current_site
 
-from accounts                       import signals
-from accounts.compat                import reverse, is_authenticated
-from accounts.conf                  import settings
-from accounts.forms                 import SignupForm, LoginUsernameForm
-from accounts.forms                 import ChangePasswordForm, PasswordResetForm, PasswordResetTokenForm
-from accounts.forms                 import SettingsForm
-from accounts.hooks                 import hookset
-from accounts.mixins                import LoginRequiredMixin
-from accounts.models                import SignupCode, EmailAddress, EmailConfirmation, Account, AccountDeletion, PasswordHistory
-from accounts.utils                 import default_redirect, get_form_data
+def index(request):
+    if request.user.is_authenticated():
+        email_address = EmailAddress.objects.get(user = request.user)
+        if email_address.verified:
+            return render_to_response('home.html', {'user':request.user.username,'ver':"You are not verified", 'veri':1 })
+        else:
+            return render_to_response('home.html', {'user': request.user.username, 'ver':"You are not verified", 'veri':0 })
+    else:
+        return render_to_response('index.html')
 
+def resendConfirmation(request):
+    email_address = EmailAddress.objects.get(user = request.user)
+    if email_address.verified:
+        return redirect('')
+    else:
+        email_address = EmailAddress.objects.get(user = request.user)
+        email_address.send_confirmation(site=get_current_site(request))
+        return HttpResponse("{% block body %}Verification email has been sent{% endblock %}")
 
 class PasswordMixin(object):
     redirect_field_name = "next"
@@ -94,17 +115,17 @@ class PasswordMixin(object):
 
 class SignupView(PasswordMixin, FormView):
 
-    template_name = "accounts/signup.html"
-    template_name_ajax = "accounts/ajax/signup.html"
-    template_name_email_confirmation_sent = "accounts/email_confirmation_sent.html"
-    template_name_email_confirmation_sent_ajax = "accounts/ajax/email_confirmation_sent.html"
-    template_name_signup_closed = "accounts/signup_closed.html"
-    template_name_signup_closed_ajax = "accounts/ajax/signup_closed.html"
-    form_class = SignupForm
-    form_kwargs = {}
-    form_password_field = "password"
-    redirect_field_name = "next"
-    identifier_field = "username"
+    template_name                               = "accounts/signup.html"
+    template_name_ajax                          = "accounts/ajax/signup.html"
+    template_name_email_confirmation_sent       = "accounts/email_confirmation_sent.html"
+    template_name_email_confirmation_sent_ajax  = "accounts/ajax/email_confirmation_sent.html"
+    template_name_signup_closed                 = "accounts/signup_closed.html"
+    template_name_signup_closed_ajax            = "accounts/ajax/signup_closed.html"
+    form_class                                  = SignupForm
+    form_kwargs                                 = {}
+    form_password_field                         = "password"
+    redirect_field_name                         = "next"
+    identifier_field                            = "username"
     messages = {
         "email_confirmation_sent": {
             "level": messages.INFO,
@@ -188,7 +209,7 @@ class SignupView(PasswordMixin, FormView):
 
     def form_valid(self, form):
         self.created_user = self.create_user(form, commit=False)
-        # prevent User post_save signal from creating an Account instance
+        # prevent User post_save signal from creating an User instance
         # we want to handle that ourself.
         self.created_user._disable_account_creation = True
         self.created_user.save()
@@ -233,6 +254,8 @@ class SignupView(PasswordMixin, FormView):
         username = form.cleaned_data.get("username")
         if username is None:
             username = self.generate_username(form)
+        user.first_name = form.cleaned_data.get("first_name")
+        user.last_name = form.cleaned_data.get("last_name")
         user.username = username
         user.email = form.cleaned_data["email"].strip()
         password = form.cleaned_data.get("password")
@@ -245,7 +268,7 @@ class SignupView(PasswordMixin, FormView):
         return user
 
     def create_account(self, form):
-        return Account.create(request=self.request, user=self.created_user, create_email=False)
+        return AartUser.create(request=self.request, user=self.created_user, create_email=False)
 
     def generate_username(self, form):
         raise NotImplementedError(
@@ -688,15 +711,15 @@ class PasswordResetTokenView(PasswordMixin, FormView):
         return self.response_class(**response_kwargs)
 
 
-class SettingsView(LoginRequiredMixin, FormView):
+class UserSettingsView(LoginRequiredMixin, FormView):
 
     template_name = "accounts/settings.html"
-    form_class = SettingsForm
+    form_class = UserSettingsForm
     redirect_field_name = "next"
     messages = {
         "settings_updated": {
             "level": messages.SUCCESS,
-            "text": _("Account settings updated.")
+            "text": _("User settings updated.")
         },
     }
 
@@ -705,10 +728,10 @@ class SettingsView(LoginRequiredMixin, FormView):
         # to initialize self with a request in a known good state (of course
         # this only works with a FormView)
         self.primary_email_address = EmailAddress.objects.get_primary(self.request.user)
-        return super(SettingsView, self).get_form_class()
+        return super(UserSettingsView, self).get_form_class()
 
     def get_initial(self):
-        initial = super(SettingsView, self).get_initial()
+        initial = super(UserSettingsView, self).get_initial()
         if self.primary_email_address:
             initial["email"] = self.primary_email_address.email
         initial["timezone"] = self.request.user.account.timezone
@@ -744,7 +767,7 @@ class SettingsView(LoginRequiredMixin, FormView):
                 self.primary_email_address.change(email, confirm=confirm)
 
     def get_context_data(self, **kwargs):
-        ctx = super(SettingsView, self).get_context_data(**kwargs)
+        ctx = super(UserSettingsView, self).get_context_data(**kwargs)
         redirect_field_name = self.get_redirect_field_name()
         ctx.update({
             "redirect_field_name": redirect_field_name,
@@ -785,7 +808,7 @@ class DeleteView(LogoutView):
     }
 
     def post(self, *args, **kwargs):
-        AccountDeletion.mark(self.request.user)
+        UserDeletion.mark(self.request.user)
         auth.logout(self.request)
         messages.add_message(
             self.request,
