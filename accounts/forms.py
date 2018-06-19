@@ -135,13 +135,14 @@ class LoginForm(forms.Form):
         try:
             user = AartUser.objects.get(username=username)
         except AartUser.DoesNotExist:
-            raise forms.ValidationError("Your username/email or password is incorrect.")
-        else:
-            if user and user.check_password(password):
-                self.user = user
-            else:
+            try:
+                user = AartUser.objects.get(email=username)
+            except AartUser.DoesNotExist:
                 raise forms.ValidationError("Your username/email or password is incorrect.")
-        self.user = authenticate(username=username, password=password)
+        if user and user.check_password(password):
+            self.user = authenticate(username=user.username, password=password)
+        else:
+            raise forms.ValidationError("Your username/email or password is incorrect.")
         return self.cleaned_data
 
     def user_credentials(self):
