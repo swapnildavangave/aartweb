@@ -7,7 +7,6 @@ from django.db.models               import Q
 from django.db.models.signals       import post_save
 from django.dispatch                import receiver
 from django.utils                   import timezone, translation, six
-from django.utils.encoding          import python_2_unicode_compatible
 from django.utils.translation       import ugettext_lazy as _
 from django.contrib.auth.models     import AnonymousUser
 from django.contrib.sites.models    import Site
@@ -15,7 +14,7 @@ from account                        import signals
 from account.compat                 import reverse, is_authenticated
 from account.conf                   import settings
 from account.fields                 import TimeZoneField
-from account.hooks                  import hookset
+from accounts.hooks                 import hookset
 from account.managers               import EmailAddressManager, EmailConfirmationManager
 from account.signals                import signup_code_sent, signup_code_used
 
@@ -23,10 +22,9 @@ import pytz
 import datetime
 import operator
 
-@python_2_unicode_compatible
-class AartUser(models.Model):
 
-    user = models.OneToOneField(settings.AUTH_USER_MODEL, related_name="account", verbose_name=_("user"), on_delete=models.CASCADE)
+class AartUser(models.Model):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, related_name="accounts", verbose_name=_("user"), on_delete=models.CASCADE)
     timezone = TimeZoneField(_("timezone"))
     language = models.CharField(
         _("language"),
@@ -89,7 +87,6 @@ def user_post_save(sender, **kwargs):
         AartUser.create(user=user)
 
 
-@python_2_unicode_compatible
 class AnonymousUser(object):
 
     def __init__(self, request=None):
@@ -104,7 +101,7 @@ class AnonymousUser(object):
         return "AnonymousUser"
 
 
-@python_2_unicode_compatible
+
 class SignupCode(models.Model):
 
     class AlreadyExists(Exception):
@@ -225,7 +222,7 @@ class SignupCodeResult(models.Model):
         self.signup_code.calculate_use_count()
 
 
-@python_2_unicode_compatible
+
 class EmailAddress(models.Model):
 
     user        = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
@@ -273,7 +270,7 @@ class EmailAddress(models.Model):
                 self.send_confirmation()
 
 
-@python_2_unicode_compatible
+
 class EmailConfirmation(models.Model):
 
     email_address = models.ForeignKey(EmailAddress, on_delete=models.CASCADE)
@@ -292,7 +289,11 @@ class EmailConfirmation(models.Model):
 
     @classmethod
     def create(cls, email_address):
-        key = hookset.generate_email_confirmation_token(email_address.email)
+        try:
+            key = hookset.generate_email_confirmation_token(email_address.email)
+        except Exception as e:
+            key = hookset.generate_email_confirmation_token(self=hookset,email=email_address.email)
+        print("after calling .... ")
         return cls._default_manager.create(email_address=email_address, key=key)
 
     def key_expired(self):
@@ -324,7 +325,10 @@ class EmailConfirmation(models.Model):
             "current_site": current_site,
             "key": self.key,
         }
-        hookset.send_confirmation_email([self.email_address.email], ctx)
+        try:
+            hookset.send_confirmation_email([self.email_address.email], ctx)
+        except Exception as e:
+            hookset.send_confirmation_email(hookset,[self.email_address.email], ctx)
         self.sent = timezone.now()
         self.save()
         signals.email_confirmation_sent.send(sender=self.__class__, confirmation=self)
@@ -369,9 +373,9 @@ class PasswordHistory(models.Model):
         verbose_name = _("password history")
         verbose_name_plural = _("password histories")
 
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, related_name="password_history", on_delete=models.CASCADE)
-    password = models.CharField(max_length=255)  # encrypted password
-    timestamp = models.DateTimeField(default=timezone.now)  # password creation time
+    user        = models.ForeignKey(settings.AUTH_USER_MODEL, related_name="password_history", on_delete=models.CASCADE)
+    password    = models.CharField(max_length=255)  # encrypted password
+    timestamp   = models.DateTimeField(default=timezone.now)  # password creation time
 
 
 class PasswordExpiry(models.Model):

@@ -1,18 +1,18 @@
 try:
-    from collections            import OrderedDict
+    from collections                    import OrderedDict
 except ImportError:
     OrderedDict = None
-from django                     import forms
-from django.utils.encoding      import force_text
-from django.utils.translation   import ugettext_lazy as _
-from django.contrib             import auth
-from django.contrib.auth        import get_user_model
-from account.conf               import settings
-from account.hooks              import hookset
-from accounts.models            import EmailAddress
-from account.utils              import get_user_lookup_kwargs
-from models                     import AartUser
+from django                             import forms
+from django.utils.encoding              import force_text
+from django.utils.translation           import ugettext_lazy as _
+from django.contrib                     import auth
+from django.contrib.auth                import get_user_model
+from account.conf                       import settings
+from accounts.hooks                     import hookset
+from accounts.models                    import EmailAddress
+from accounts.utils                     import get_user_lookup_kwargs
 import re
+from django.contrib.auth                import authenticate
 
 
 
@@ -114,8 +114,9 @@ class SignupForm(forms.Form):
 
 
 class LoginForm(forms.Form):
-
-    password = PasswordField(
+    identifier_field    = "username"
+    username            = forms.CharField(label=_("Username"), max_length=30, widget=forms.TextInput(attrs={'placeholder': 'Username Or Email'}))
+    password            = PasswordField(
         label=_("Password"),
         strip=settings.ACCOUNT_PASSWORD_STRIP,
     )
@@ -130,16 +131,17 @@ class LoginForm(forms.Form):
             return
         username = self.cleaned_data['username']
         password = self.cleaned_data['password']
+        AartUser = get_user_model()
         try:
-            user = AartUser.objects.get(email=username)
+            user = AartUser.objects.get(username=username)
         except AartUser.DoesNotExist:
-            return forms.ValidationError(self.authentication_fail_message)
+            raise forms.ValidationError("Your username/email or password is incorrect.")
         else:
-            user = auth.authenticate(**self.user_credentials())
-        if user and user.check_password(password):
-            self.user = user
-        else:
-            raise forms.ValidationError(self.authentication_fail_message)
+            if user and user.check_password(password):
+                self.user = user
+            else:
+                raise forms.ValidationError("Your username/email or password is incorrect.")
+        self.user = authenticate(username=username, password=password)
         return self.cleaned_data
 
     def user_credentials(self):
@@ -208,8 +210,18 @@ class PasswordResetTokenForm(forms.Form):
 
 class UserSettingsForm(forms.Form):
 
-    first_name
-    last_name
+    first_name = forms.CharField(
+        label=_("First Name"),
+        max_length=30,
+        widget=forms.TextInput(),
+        required=True
+    )
+    last_name = forms.CharField(
+        label=_("Last Name"),
+        max_length=30,
+        widget=forms.TextInput(),
+        required=True
+    )
     email = forms.EmailField(label=_("Email"), required=True)
     timezone = forms.ChoiceField(
         label=_("Timezone"),
@@ -231,3 +243,15 @@ class UserSettingsForm(forms.Form):
         if not qs.exists() or not settings.ACCOUNT_EMAIL_UNIQUE:
             return value
         raise forms.ValidationError(_("A user is registered with this email address."))
+
+    def clean_first_name(self):
+        if not alnum_re.search(self.cleaned_data["first_name"]):
+            raise forms.ValidationError(_("First Name can only contain letters, numbers and underscores."))
+        
+        return self.cleaned_data["first_name"]
+    
+    def clean_first_name(self):
+        if not alnum_re.search(self.cleaned_data["last_name"]):
+            raise forms.ValidationError(_("Last Name can only contain letters, numbers and underscores."))
+        
+        return self.cleaned_data["last_name"]

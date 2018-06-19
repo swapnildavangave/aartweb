@@ -17,18 +17,17 @@ from django.contrib.sites.shortcuts     import get_current_site
 from account                            import signals
 from account.compat                     import reverse, is_authenticated
 from account.conf                       import settings
-from account.forms                      import SignupForm, LoginUsernameForm
-from account.forms                      import ChangePasswordForm, PasswordResetForm, PasswordResetTokenForm
-from account.forms                      import UserSettingsForm
-from account.hooks                      import hookset
-from account.mixins                     import LoginRequiredMixin
-from account.models                     import SignupCode, EmailAddress, EmailConfirmation, AartUser, UserDeletion, PasswordHistory
-from account.utils                      import default_redirect, get_form_data
+from accounts.forms                     import SignupForm, LoginForm
+from accounts.forms                     import ChangePasswordForm, PasswordResetForm, PasswordResetTokenForm
+from accounts.forms                     import UserSettingsForm
+from accounts.hooks                     import hookset
+from accounts.mixins                    import LoginRequiredMixin
+from accounts.models                    import SignupCode, EmailAddress, EmailConfirmation, AartUser, UserDeletion, PasswordHistory
+from accounts.utils                     import default_redirect, get_form_data
 from django.shortcuts                   import render_to_response, redirect
 from django.template                    import loader, Context
 from django.template                    import RequestContext
 from django.contrib.sites.shortcuts     import get_current_site
-
 
 def index(request):
     if request.user.is_authenticated():
@@ -288,7 +287,6 @@ class SignupView(PasswordMixin, FormView):
             self.signup_code.use(user)
 
     def send_email_confirmation(self, email_address):
-        print("send email called")
         email_address.send_confirmation(site=get_current_site(self.request))
 
     def after_signup(self, form):
@@ -349,10 +347,10 @@ class SignupView(PasswordMixin, FormView):
 
 class LoginView(FormView):
 
-    template_name = "accounts/login.html"
-    template_name_ajax = "accounts/ajax/login.html"
-    form_class = LoginUsernameForm
-    form_kwargs = {}
+    template_name       = "accounts/login.html"
+    template_name_ajax  = "accounts/ajax/login.html"
+    form_class          = LoginForm
+    form_kwargs         = {}
     redirect_field_name = "next"
 
     @method_decorator(sensitive_post_parameters())
@@ -395,6 +393,7 @@ class LoginView(FormView):
         return super(LoginView, self).form_invalid(form)
 
     def form_valid(self, form):
+        print("phrase : ", form.user)
         self.login_user(form)
         self.after_login(form)
         return redirect(self.get_success_url())
@@ -751,6 +750,18 @@ class UserSettingsView(LoginRequiredMixin, FormView):
     def update_settings(self, form):
         self.update_email(form)
         self.update_account(form)
+
+    def first_name(self, form):
+        first_name      = form.cleaned_data["first_name"]
+        user            = self.request.user
+        user.first_name = first_name 
+        user.save()
+        
+    def last_name(self, form):
+        first_name      = form.cleaned_data["last_name"]
+        user            = self.request.user
+        user.last_name  = last_name 
+        user.save()
 
     def update_email(self, form, confirm=None):
         user = self.request.user
